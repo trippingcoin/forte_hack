@@ -117,26 +117,26 @@ curl -X POST http://localhost:8000/predict/combined \
 ## Структура моделей
 
 ```
-models/
-├── transactions/
-│   ├── lightgbm_model.txt
-│   ├── xgboost_model.json (если --ensemble)
-│   ├── catboost_model.cbm (если --ensemble)
-│   ├── model_meta.pkl
-│   ├── shap_background.pkl
-│   └── feature_importance.csv
-│
-└── client_activity/
-    ├── lightgbm_model.txt
-    ├── xgboost_model.json (если --ensemble)
-    ├── catboost_model.cbm (если --ensemble)
-    ├── model_meta.pkl
-    ├── shap_background.pkl
-    └── feature_importance.csv
+```bash
+# 1. Обработать оба датасета (wrapper)
+./scripts/run_preprocess.sh
+
+# 2. Обучить модели для обоих датасетов (с ensemble) (wrapper)
+./scripts/run_train.sh both --ensemble
+
+# 3. Запустить API сервис (wrapper)
+./scripts/run_service.sh
+
+# 4. В другом терминале: тестировать API (wrapper)
+./scripts/test_api.sh
 ```
 
----
-
+Или использовать единый pipeline wrapper:
+```bash
+./scripts/run_pipeline.sh both --ensemble
+./scripts/run_service.sh
+./scripts/test_api.sh
+```
 ## Быстрый старт (новый workflow)
 
 ```bash

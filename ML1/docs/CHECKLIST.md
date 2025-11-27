@@ -82,7 +82,7 @@
 ### Preprocessing
 ```bash
 # ✅ Проверить, что код обрабатывает оба датасета
-python preprocess.py --help
+./scripts/run_preprocess.sh --help 2>/dev/null || python src/preprocess.py --help
 # Должны быть параметры:
 # - --transactions_input
 # - --client_activity_input
@@ -93,7 +93,7 @@ python preprocess.py --help
 ### Training
 ```bash
 # ✅ Проверить выбор датасетов
-python train.py --help
+./scripts/run_train.sh --help 2>/dev/null || python src/train.py --help
 # Должны быть:
 # - --dataset {transactions|client_activity|both}
 # - --processed_transactions
@@ -102,8 +102,9 @@ python train.py --help
 
 ### Inference
 ```bash
-# ✅ Проверить endpoints
-python infer_service.py --help
+# ✅ Проверить endpoints (start service via wrapper)
+./scripts/run_service.sh &
+# Or run directly: python src/infer_service.py
 # Должны быть endpoints:
 # - GET /health
 # - POST /predict/transaction

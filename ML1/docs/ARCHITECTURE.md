@@ -10,8 +10,8 @@ transactions.csv          client_activity.csv
 (fraud labels)            (fraud labels)
     |                           |
     v                           v
-┌─────────────────────────────────────────┐
-│         preprocess.py                    │
+  ┌─────────────────────────────────────────┐
+  │         src/preprocess.py                 │
 │  ┌──────────────┐  ┌──────────────────┐ │
 │  │ Transactions │  │ Client Activity  │ │
 │  │  Features    │  │  Features        │ │
@@ -19,7 +19,7 @@ transactions.csv          client_activity.csv
 └─────────────────────────────────────────┘
     |                           |
     v                           v
-processed_transactions.parquet  processed_client_activity.parquet
+  processed_transactions.parquet  processed_client_activity.parquet
 
 
 TRAINING
@@ -28,7 +28,7 @@ TRAINING
               |                                        |
               v                                        v
     ┌──────────────────────────┐      ┌──────────────────────────┐
-    │  train.py                │      │  train.py                │
+    │  src/train.py            │      │  src/train.py            │
     │ (--dataset transactions) │      │ (--dataset client_activity)
     │                          │      │                          │
     │ ┌────────────────────┐   │      │ ┌────────────────────┐   │
@@ -58,7 +58,7 @@ TRAINING
 
 INFERENCE
 =========
-        infer_service.py
+  src/infer_service.py
         ┌──────────────────────────────┐
         │  Load Both Models on Startup  │
         │  - transactions model        │
@@ -154,7 +154,7 @@ Threshold Strategies:
   4. balanced   -> balance precision/recall
 
 Example:
-  python train.py --threshold_strategy recall --min_recall 0.5
+  python src/train.py --threshold_strategy recall --min_recall 0.5
   -> prioritize catching frauds (recall) over false positives
   
 
@@ -162,13 +162,13 @@ DEPLOYMENT
 ==========
 
 1. Preprocess Data:
-   python preprocess.py
+  ./scripts/run_preprocess.sh  # or: python src/preprocess.py
    
 2. Train Models:
-   python train.py --dataset both --ensemble
+  ./scripts/run_train.sh both --ensemble  # or: python src/train.py --dataset both --ensemble
    
 3. Start API Server:
-   python infer_service.py
+  ./scripts/run_service.sh  # or: python src/infer_service.py
    
 4. Make Predictions:
    - Via HTTP (curl, requests, etc.)

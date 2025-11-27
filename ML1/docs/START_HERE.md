@@ -38,19 +38,31 @@
 
 ### 1️⃣ Обработать данные
 ```bash
-python preprocess.py
+# Wrapper (recommended)
+./scripts/run_preprocess.sh
+
+# Or direct
+python src/preprocess.py
 ```
 Создаст: `processed_transactions.parquet` и `processed_client_activity.parquet`
 
 ### 2️⃣ Обучить модели
 ```bash
-python train.py --dataset both --ensemble
+# Wrapper (recommended)
+./scripts/run_train.sh both --ensemble
+
+# Or direct
+python src/train.py --dataset both --ensemble
 ```
 Создаст модели в: `models/transactions/` и `models/client_activity/`
 
 ### 3️⃣ Запустить API
 ```bash
-python infer_service.py
+# Wrapper (recommended)
+./scripts/run_service.sh
+
+# Or direct
+python src/infer_service.py
 ```
 Сервис будет доступен на: `http://localhost:8000`
 

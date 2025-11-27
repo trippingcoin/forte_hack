@@ -4,11 +4,11 @@
 
 ### Preprocessing
 ```bash
-# Both datasets
-python preprocess.py
+# Both datasets (wrapper)
+./scripts/run_preprocess.sh
 
-# With custom paths
-python preprocess.py \
+# With custom paths (direct)
+python src/preprocess.py \
   --transactions_input data/transactions.csv \
   --client_activity_input data/client_activity.csv \
   --transactions_output data/processed_transactions.parquet \
@@ -18,27 +18,25 @@ python preprocess.py \
 ### Training
 
 ```bash
-# Both datasets with ensemble
-python train.py --dataset both --ensemble
+# Both datasets with ensemble (wrapper)
+./scripts/run_train.sh both --ensemble
 
-# Both datasets without ensemble (faster, less memory)
-python train.py --dataset both
+# Direct calls (advanced)
+python src/train.py --dataset both --ensemble
+python src/train.py --dataset both
+python src/train.py --dataset transactions
+python src/train.py --dataset client_activity
 
-# Only transactions
-python train.py --dataset transactions
-
-# Only client activity
-python train.py --dataset client_activity
-
-# With threshold optimization
-python train.py --dataset both --threshold_strategy recall --min_recall 0.5
+# With threshold optimization (direct)
+python src/train.py --dataset both --threshold_strategy recall --min_recall 0.5
 ```
 
-**Threshold Strategies:**
-- `precision` - max recall at desired precision (default)
+- **Threshold Strategies:**
+- `precision` - max recall at desired precision
 - `f1` - maximize F1-score
 - `recall` - maximize recall with min precision
-- `balanced` - balance precision/recall
+- `balanced` - balance precision/recall (default)
+```
 
 ### Inference Service
 ```bash

@@ -60,29 +60,42 @@ ML1/
 
 ## 🔄 Data Pipeline
 
-### Шаг 1: Preprocessing (preprocess.py)
+### Шаг 1: Preprocessing (`src/preprocess.py`)
+
+Wrapper (recommended):
 
 ```bash
-python preprocess.py \
-    --transactions_input data/transactions.csv \
-    --client_activity_input data/client_activity.csv \
-    --transactions_output data/processed_transactions.parquet \
-    --client_activity_output data/processed_client_activity.parquet
+./scripts/run_preprocess.sh
+```
+
+Direct invocation:
+
+```bash
+python src/preprocess.py \
+  --transactions_input data/transactions.csv \
+  --client_activity_input data/client_activity.csv \
+  --transactions_output data/processed_transactions.parquet \
+  --client_activity_output data/processed_client_activity.parquet
 ```
 
 **Выход:**
 - `processed_transactions.parquet` (30+ признаков для транзакций)
 - `processed_client_activity.parquet` (20+ признаков для активности)
 
-### Шаг 2: Training (train.py)
+### Шаг 2: Training (`src/train.py`)
+
+Wrapper (recommended):
 
 ```bash
-# Обучить обе модели с ensemble
-python train.py --dataset both --ensemble
+./scripts/run_train.sh both --ensemble
+```
 
-# Или только одну
-python train.py --dataset transactions
-python train.py --dataset client_activity
+Direct invocation:
+
+```bash
+python src/train.py --dataset both --ensemble
+python src/train.py --dataset transactions
+python src/train.py --dataset client_activity
 ```
 
 **Выход:**
@@ -92,7 +105,7 @@ python train.py --dataset client_activity
 ### Шаг 3: Inference (infer_service.py)
 
 ```bash
-python infer_service.py  # Runs on http://localhost:8000
+./scripts/run_service.sh  # Runs on http://localhost:8000
 ```
 
 **API Endpoints:**
@@ -107,23 +120,23 @@ python infer_service.py  # Runs on http://localhost:8000
 
 ```bash
 # 1️⃣ Обработать данные
-python preprocess.py
+./scripts/run_preprocess.sh
 
 # 2️⃣ Обучить модели
-python train.py --dataset both --ensemble
+./scripts/run_train.sh both --ensemble
 
 # 3️⃣ Запустить API сервис
-python infer_service.py
+./scripts/run_service.sh
 
 # 4️⃣ В другом терминале: тестировать API
-python test_api.py
+./scripts/test_api.sh
 ```
 
-Или используйте скрипт:
+Или используйте единый pipeline wrapper:
 ```bash
-./run_pipeline.sh both --ensemble
-python infer_service.py
-python test_api.py
+./scripts/run_pipeline.sh both --ensemble
+./scripts/run_service.sh
+./scripts/test_api.sh
 ```
 
 ---
@@ -197,8 +210,8 @@ curl -X POST http://localhost:8000/predict/combined \
 - Top-5 самых важных признаков
 - Визуализация влияния признаков
 
-### 🎛️ Гибкие Параметры
-- Стратегии выбора порога: precision, f1, recall, balanced
+- ### 🎛️ Гибкие Параметры
+- Стратегии выбора порога: precision, f1, recall, balanced (по умолчанию `balanced`)
 - Выбор между single LightGBM и ensemble (LightGBM + XGBoost + CatBoost)
 - Настройка желаемой precision/recall
 
