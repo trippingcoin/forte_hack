@@ -2,6 +2,8 @@ pandas
 numpy
 scikit-learn
 lightgbm
+xgboost
+catboost
 shap
 fastapi
 uvicorn[standard]
