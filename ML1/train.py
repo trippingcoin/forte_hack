@@ -45,7 +45,9 @@ def time_split(df, time_col='timestamp', train_days=90, val_days=14, test_days=1
 def select_features(df):
     # Примеры фич — отредактируй под свой фрейм
     ignore = ['transaction_id','src_account_id','dst_account_id','beneficiary_id','timestamp','confirmed_fraud']
-    features = [c for c in df.columns if c not in ignore]
+    # Исключаем категориальные и нечисловые столбцы
+    features = [c for c in df.columns if c not in ignore 
+                and df[c].dtype in ['float64', 'float32', 'int64', 'int32', 'int16', 'int8', 'uint8', 'uint16', 'uint32', 'uint64']]
     return features
 
 def choose_threshold(y_true, y_scores, desired_precision=0.7, strategy='precision', min_recall=0.4):
@@ -243,10 +245,18 @@ def train_ensemble(X_train, y_train, X_val, y_val, scale_pos_weight):
     
     return models, ensemble_pred
 
-def main(processed_path, model_dir, desired_precision, threshold_strategy='precision', use_ensemble=False, min_recall=0.4):
+def main(processed_path, model_dir, desired_precision, threshold_strategy='balanced', use_ensemble=False, min_recall=0.4):
     df = pd.read_parquet(processed_path)
     # ensure timestamp is datetime
     df['timestamp'] = pd.to_datetime(df['timestamp'])
+    
+    # Check if target column exists
+    if 'confirmed_fraud' not in df.columns:
+        print(f"Warning: 'confirmed_fraud' column not found in {processed_path}")
+        print("Available columns:", list(df.columns))
+        print("Skipping training for this dataset - no target variable found")
+        return
+    
     df_train, df_val, df_test = time_split(df, time_col='timestamp')
     print("Splits:", len(df_train), len(df_val), len(df_test))
     print(f"Fraud rates - Train: {df_train['confirmed_fraud'].mean():.3f}, Val: {df_val['confirmed_fraud'].mean():.3f}, Test: {df_test['confirmed_fraud'].mean():.3f}")
@@ -459,10 +469,14 @@ def main(processed_path, model_dir, desired_precision, threshold_strategy='preci
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--processed", type=str, default="data/processed.parquet")
+    parser.add_argument("--processed_transactions", type=str, default="data/processed_transactions.parquet")
+    parser.add_argument("--processed_client_activity", type=str, default="data/processed_client_activity.parquet")
     parser.add_argument("--model_dir", type=str, default=MODEL_DIR)
+    parser.add_argument("--dataset", type=str, default="both", 
+                        choices=['transactions', 'client_activity', 'both'],
+                        help="Which dataset to train on: transactions, client_activity, or both")
     parser.add_argument("--desired_precision", type=float, default=0.7)
-    parser.add_argument("--threshold_strategy", type=str, default="precision", 
+    parser.add_argument("--threshold_strategy", type=str, default="balanced", 
                         choices=['precision', 'f1', 'balanced', 'recall'],
                         help="Strategy for threshold selection: precision (max recall at desired precision), f1 (max F1), balanced, recall (optimize for recall)")
     parser.add_argument("--ensemble", action="store_true",
@@ -470,4 +484,18 @@ if __name__ == "__main__":
     parser.add_argument("--min_recall", type=float, default=0.4,
                         help="Minimum recall target for balanced/recall strategies (default: 0.4)")
     args = parser.parse_args()
-    main(args.processed, args.model_dir, args.desired_precision, args.threshold_strategy, args.ensemble, args.min_recall)
+    
+    # Train on selected datasets
+    if args.dataset in ['transactions', 'both']:
+        print("\n" + "="*80)
+        print("TRAINING ON TRANSACTIONS DATA")
+        print("="*80)
+        main(args.processed_transactions, os.path.join(args.model_dir, 'transactions'), 
+             args.desired_precision, args.threshold_strategy, args.ensemble, args.min_recall)
+    
+    if args.dataset in ['client_activity', 'both']:
+        print("\n" + "="*80)
+        print("TRAINING ON CLIENT ACTIVITY DATA")
+        print("="*80)
+        main(args.processed_client_activity, os.path.join(args.model_dir, 'client_activity'), 
+             args.desired_precision, args.threshold_strategy, args.ensemble, args.min_recall)
