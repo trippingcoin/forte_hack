@@ -22,7 +22,7 @@ fi
 echo ""
 echo "Step 1: Preprocessing both datasets..."
 echo "-------------------------------------------"
-python preprocess.py \
+python src/preprocess.py \
     --transactions_input data/transactions.csv \
     --client_activity_input data/client_activity.csv \
     --transactions_output data/processed_transactions.parquet \
@@ -35,7 +35,7 @@ echo "-------------------------------------------"
 DATASET=${1:-"both"}
 ENSEMBLE=${2:-"--ensemble"}
 
-python train.py \
+python src/train.py \
     --processed_transactions data/processed_transactions.parquet \
     --processed_client_activity data/processed_client_activity.parquet \
     --dataset "$DATASET" \
@@ -49,7 +49,7 @@ echo ""
 echo "Models saved to: models/"
 echo ""
 echo "To start the inference service, run:"
-echo "  python infer_service.py"
+echo "  python src/infer_service.py"
 echo ""
 echo "Then test with:"
 echo "  curl -X POST http://localhost:8000/predict/transaction \\"

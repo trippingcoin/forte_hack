@@ -146,7 +146,7 @@ if __name__ == "__main__":
     except requests.exceptions.ConnectionError:
         print("ERROR: Could not connect to API server!")
         print("Make sure to run the inference service first:")
-        print("  python infer_service.py")
+        print("  python src/infer_service.py")
         sys.exit(1)
     except Exception as e:
         print(f"ERROR: {e}")
