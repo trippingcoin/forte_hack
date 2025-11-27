@@ -1,10 +1,12 @@
 """
 preprocess.py
-- Загружает CSV
-- Делает базовый feature engineering (временные признаки, агрегаты за простые окна)
-- Сохраняет processed CSV для обучения
+- Загружает CSV (transactions.csv и client_activity.csv)
+- Делает базовый feature engineering для каждого датасета
+- Сохраняет processed данные для обучения
 
-Настрой: INPUT_PATH, OUTPUT_PATH, names of columns according to your CSV.
+Поддерживает два датасета:
+1. transactions.csv - транзакционные данные
+2. client_activity.csv - активность клиентов
 """
 import pandas as pd
 import numpy as np
@@ -12,7 +14,17 @@ from datetime import timedelta
 import argparse
 import os
 
-def basic_feature_engineering(df):
+def preprocess_transactions(df):
+    """Preprocessing для транзакций (transactions.csv)"""
+    # Переименование столбцов
+    df = df.rename(columns={
+        "transdatetime": "timestamp",
+        "cst_dim_id": "src_account_id",
+        "direction": "beneficiary_id",
+        "docno": "transaction_id",
+        "target": "confirmed_fraud"
+    })
+    
     # Преобразования времени
     df['timestamp'] = pd.to_datetime(df['timestamp'])
     if 'transdate' in df.columns:
@@ -84,28 +96,85 @@ def basic_feature_engineering(df):
     
     return df
 
-def main(input_path, output_path):
-    df = pd.read_csv(input_path, encoding="windows-1251", sep=";", skiprows=1)
-
+def preprocess_client_activity(df):
+    """Preprocessing для активности клиентов (client_activity.csv)"""
+    # Переименование столбцов для стандартизации
     df = df.rename(columns={
-    "transdatetime": "timestamp",
-    "cst_dim_id": "src_account_id",
-    "direction": "beneficiary_id",
-    "docno": "transaction_id",
-    "target": "confirmed_fraud"
+        "transdate": "timestamp",
+        "cst_dim_id": "src_account_id",
     })
+    
+    # Преобразование categorical columns в числовые через факторизацию
+    categorical_cols = df.select_dtypes(include=['object']).columns
+    for col in categorical_cols:
+        if col not in ['timestamp', 'src_account_id']:
+            df[col] = pd.factorize(df[col])[0]
+    
+    # Преобразование timestamp
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    
+    # Временные признаки
+    df['hour'] = df['timestamp'].dt.hour
+    df['dow'] = df['timestamp'].dt.dayofweek
+    df['is_weekend'] = df['dow'].isin([5,6]).astype(int)
+    df['day_of_month'] = df['timestamp'].dt.day
+    df['month'] = df['timestamp'].dt.month
+    df['is_night'] = ((df['hour'] >= 22) | (df['hour'] < 6)).astype(int)
+    df['is_business_hours'] = ((df['hour'] >= 9) & (df['hour'] < 18) & (df['dow'] < 5)).astype(int)
+    
+    # Логирование числовых признаков
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    for col in numeric_cols:
+        if col not in ['src_account_id', 'confirmed_fraud']:
+            if (df[col] > 0).sum() > 0:
+                df[f'log_{col}'] = np.log1p(df[col])
+    
+    # Создание синтетического целевого столбца
+    if 'confirmed_fraud' not in df.columns:
+        df['login_spike'] = (df['logins_last_7_days'] > df['logins_last_7_days'].quantile(0.9)).astype(int)
+        df['unusual_devices'] = (df['monthly_os_changes'] + df['monthly_phone_model_changes'] > 3).astype(int)
+        df['confirmed_fraud'] = ((df['login_spike'] & df['unusual_devices']).astype(int) | 
+                                 (df['logins_7d_over_30d_ratio'] > 2.0).astype(int))
+        df = df.drop(columns=['login_spike', 'unusual_devices'])
+    
+    # Заполняем NaN нулями
+    for c in df.select_dtypes(include=[np.number]).columns:
+        df[c] = df[c].fillna(0)
+    
+    # Удаляем inf значения
+    df = df.replace([np.inf, -np.inf], 0)
+    
+    return df
 
-    print("Loaded", len(df), "rows")
-    df_proc = basic_feature_engineering(df)
-    os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
-    df_proc.to_parquet(output_path, index=False)
-    print("Saved processed data to", output_path)
+def main(transactions_path=None, client_activity_path=None, transactions_output=None, client_activity_output=None):
+    """Preprocessing для обоих датасетов."""
+    
+    if transactions_path and os.path.exists(transactions_path):
+        print(f"=== Processing {transactions_path} ===")
+        df_trans = pd.read_csv(transactions_path, encoding="windows-1251", sep=";", skiprows=1)
+        print(f"Loaded {len(df_trans)} transaction rows")
+        df_trans_proc = preprocess_transactions(df_trans)
+        os.makedirs(os.path.dirname(transactions_output) or '.', exist_ok=True)
+        df_trans_proc.to_parquet(transactions_output, index=False)
+        print(f"Saved to {transactions_output}")
+    
+    if client_activity_path and os.path.exists(client_activity_path):
+        print(f"=== Processing {client_activity_path} ===")
+        df_activity = pd.read_csv(client_activity_path, encoding="windows-1251", sep=";", skiprows=1)
+        print(f"Loaded {len(df_activity)} activity rows")
+        df_activity_proc = preprocess_client_activity(df_activity)
+        os.makedirs(os.path.dirname(client_activity_output) or '.', exist_ok=True)
+        df_activity_proc.to_parquet(client_activity_output, index=False)
+        print(f"Saved to {client_activity_output}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", type=str, default="data/transactions.csv")
-    parser.add_argument("--output", type=str, default="data/processed.parquet")
+    parser.add_argument("--transactions_input", type=str, default="data/transactions.csv")
+    parser.add_argument("--client_activity_input", type=str, default="data/client_activity.csv")
+    parser.add_argument("--transactions_output", type=str, default="data/processed_transactions.parquet")
+    parser.add_argument("--client_activity_output", type=str, default="data/processed_client_activity.parquet")
     parser.add_argument("--encoding", default="windows-1251")
 
     args = parser.parse_args()
-    main(args.input, args.output)
+    main(args.transactions_input, args.client_activity_input, 
+         args.transactions_output, args.client_activity_output)

@@ -1,1 +1,5 @@
-.venv
+venv
+.idea
+models/model_meta.pkl
+models/shap_background.pkl
+data/processed.parquet

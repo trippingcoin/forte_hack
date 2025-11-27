@@ -1,14 +1,16 @@
 """
 infer_service.py
 - FastAPI service
-- Загружает модель + metadata + shap background
-- Принимает JSON с транзакцией, вычисляет базовые realtime фичи,
-  запускает prediction, и возвращает probability + top-3 SHAP explanations
+- Загружает модели для transactions и client_activity
+- Принимает JSON с данными, вычисляет фичи
+- Возвращает predictions с объяснениями для обоих датасетов
 
-Note: Для продакшн: вынеси compute_realtime_features в отдельный модуль,
-подключай Redis/feature store.
+Поддерживает два типа предсказаний:
+1. /predict/transaction - для транзакционных данных
+2. /predict/client_activity - для активности клиента
+3. /predict/combined - для обоих типов данных сразу
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import joblib
 import lightgbm as lgb
@@ -17,6 +19,7 @@ import numpy as np
 import shap
 import uvicorn
 from typing import Dict, Any, List, Optional
+import os
 try:
     import xgboost as xgb
     XGBOOST_AVAILABLE = True
@@ -30,109 +33,137 @@ except ImportError:
 
 MODEL_DIR = "models"
 
-# Пример ожидаемого input JSON:
-# {
-#   "transaction": {
-#       "transaction_id": "...",
-#       "src_account_id": "...",
-#       "amount": 100.5,
-#       "timestamp": "2025-11-26T12:34:56",
-#       "channel": "mobile_app",
-#       ...
-#   }
-# }
-
 class TransactionInput(BaseModel):
     transaction: Dict[str, Any]
 
-app = FastAPI(title="Fraud Detection Inference")
+class ClientActivityInput(BaseModel):
+    activity: Dict[str, Any]
 
-# Load model & meta
+class CombinedInput(BaseModel):
+    transaction: Optional[Dict[str, Any]] = None
+    activity: Optional[Dict[str, Any]] = None
+
+app = FastAPI(title="Fraud Detection Inference - Multi-Dataset")
+
+# Load models & metadata for both datasets
 models = {}
-meta = None
-shap_background = None
+meta = {}
+shap_background = {}
+explainers = {}
 
 @app.on_event("startup")
-def load_model():
-    global models, meta, shap_background, explainer
-    meta_path = MODEL_DIR + "/model_meta.pkl"
-    bg_path = MODEL_DIR + "/shap_background.pkl"
-    meta = joblib.load(meta_path)
-    shap_background = joblib.load(bg_path)
+def load_models():
+    """Загружает модели для обоих датасетов"""
+    global models, meta, shap_background, explainers
     
-    model_type = meta.get('model_type', 'lightgbm')
+    datasets = ['transactions', 'client_activity']
     
-    if model_type == 'ensemble':
-        # Load ensemble models
-        model_names = meta.get('models', ['lightgbm'])
-        for name in model_names:
-            if name == 'lightgbm':
-                model_path = MODEL_DIR + "/lightgbm_model.txt"
-                models['lightgbm'] = lgb.Booster(model_file=model_path)
-            elif name == 'xgboost' and XGBOOST_AVAILABLE:
-                model_path = MODEL_DIR + "/xgboost_model.json"
-                models['xgboost'] = xgb.Booster()
-                models['xgboost'].load_model(model_path)
-            elif name == 'catboost' and CATBOOST_AVAILABLE:
-                model_path = MODEL_DIR + "/catboost_model.cbm"
-                models['catboost'] = CatBoostClassifier()
-                models['catboost'].load_model(model_path)
-        # Use LightGBM for SHAP (fastest)
-        explainer = shap.TreeExplainer(models['lightgbm'])
-        print(f"Ensemble models loaded: {list(models.keys())}. Features:", len(meta['features']))
-    else:
-        # Single LightGBM model
-        model_path = MODEL_DIR + "/lightgbm_model.txt"
-        models['lightgbm'] = lgb.Booster(model_file=model_path)
-        explainer = shap.TreeExplainer(models['lightgbm'])
-        print("LightGBM model loaded. Features:", len(meta['features']))
-    
-    app.state.explainer = explainer
+    for dataset in datasets:
+        dataset_model_dir = os.path.join(MODEL_DIR, dataset)
+        
+        # Проверяем наличие моделей для этого датасета
+        if not os.path.exists(dataset_model_dir):
+            print(f"Warning: Model directory for {dataset} not found at {dataset_model_dir}")
+            continue
+        
+        print(f"\n=== Loading {dataset} model ===")
+        
+        try:
+            meta_path = os.path.join(dataset_model_dir, "model_meta.pkl")
+            bg_path = os.path.join(dataset_model_dir, "shap_background.pkl")
+            
+            meta[dataset] = joblib.load(meta_path)
+            shap_background[dataset] = joblib.load(bg_path)
+            
+            models[dataset] = {}
+            model_type = meta[dataset].get('model_type', 'lightgbm')
+            
+            if model_type == 'ensemble':
+                # Load ensemble models
+                model_names = meta[dataset].get('models', ['lightgbm'])
+                for name in model_names:
+                    if name == 'lightgbm':
+                        model_path = os.path.join(dataset_model_dir, "lightgbm_model.txt")
+                        models[dataset]['lightgbm'] = lgb.Booster(model_file=model_path)
+                    elif name == 'xgboost' and XGBOOST_AVAILABLE:
+                        model_path = os.path.join(dataset_model_dir, "xgboost_model.json")
+                        models[dataset]['xgboost'] = xgb.Booster()
+                        models[dataset]['xgboost'].load_model(model_path)
+                    elif name == 'catboost' and CATBOOST_AVAILABLE:
+                        model_path = os.path.join(dataset_model_dir, "catboost_model.cbm")
+                        models[dataset]['catboost'] = CatBoostClassifier()
+                        models[dataset]['catboost'].load_model(model_path)
+                
+                explainers[dataset] = shap.TreeExplainer(models[dataset]['lightgbm'])
+                print(f"Ensemble models loaded for {dataset}: {list(models[dataset].keys())}. Features: {len(meta[dataset]['features'])}")
+            else:
+                # Single LightGBM model
+                model_path = os.path.join(dataset_model_dir, "lightgbm_model.txt")
+                models[dataset]['lightgbm'] = lgb.Booster(model_file=model_path)
+                explainers[dataset] = shap.TreeExplainer(models[dataset]['lightgbm'])
+                print(f"LightGBM model loaded for {dataset}. Features: {len(meta[dataset]['features'])}")
+        
+        except Exception as e:
+            print(f"Error loading model for {dataset}: {e}")
 
-def compute_realtime_features(tx: Dict[str,Any], features: List[str]):
+def compute_realtime_features(data: Dict[str, Any], features: List[str], dataset_type: str):
     """
-    Простая реализация realtime фичей по одной транзакции.
-    В реальном мире берём агрегаты из Redis/feature store.
-    Здесь: маппим поля и заполняем отсутствующие фичи нулями.
+    Вычисляет realtime фичи.
+    dataset_type: 'transactions' или 'client_activity'
     """
-    # Convert to DataFrame single row with required features
     row = {}
-    # Basic mapping examples (подстрой под свой feature list)
-    row['amount'] = float(tx.get('amount', 0.0))
-    row['log_amount'] = np.log1p(row['amount'])
-    ts = pd.to_datetime(tx.get('timestamp'))
-    row['timestamp'] = ts
-    row['hour'] = ts.hour
-    row['dow'] = ts.dayofweek
-    row['is_weekend'] = int(row['dow'] in [5,6])
-    # Example: dummy for channel one-hot columns
-    # If your features contain ch_mobile_app, ch_web, etc. create them
-    # We'll attempt to set any 'ch_*' features to 1 if matching, 0 otherwise
-    channel = tx.get('channel','unknown')
-    for f in features:
-        if f.startswith('ch_'):
-            ch_name = f.replace('ch_','')
-            row[f] = 1 if channel == ch_name else 0
-    # Fill other numeric features with zeros if not present
+    
+    # Mapping для разных типов данных
+    if dataset_type == 'transactions':
+        row['amount'] = float(data.get('amount', 0.0))
+        row['log_amount'] = np.log1p(row['amount'])
+        ts = pd.to_datetime(data.get('timestamp'))
+        row['timestamp'] = ts
+        row['hour'] = ts.hour
+        row['dow'] = ts.dayofweek
+        row['is_weekend'] = int(row['dow'] in [5,6])
+    
+    elif dataset_type == 'client_activity':
+        ts = pd.to_datetime(data.get('timestamp'))
+        row['timestamp'] = ts
+        row['hour'] = ts.hour
+        row['dow'] = ts.dayofweek
+        row['is_weekend'] = int(row['dow'] in [5,6])
+        
+        # Копируем все доступные числовые признаки
+        for key, val in data.items():
+            if key not in ['timestamp', 'src_account_id']:
+                try:
+                    row[key] = float(val)
+                except (ValueError, TypeError):
+                    pass
+    
+    # Заполняем отсутствующие фичи нулями
     for f in features:
         if f not in row:
-            row[f] = tx.get(f, 0)
+            row[f] = data.get(f, 0)
+    
     df = pd.DataFrame([row])[features]
-    # ensure numeric dtype
     df = df.fillna(0)
     return df
 
-@app.post("/predict")
-def predict(inp: TransactionInput):
-    tx = inp.transaction
-    features = meta['features']
-    X = compute_realtime_features(tx, features)
+def predict_for_dataset(data: Dict[str, Any], dataset_type: str):
+    """Делает предсказание для конкретного датасета"""
+    
+    if dataset_type not in models or dataset_type not in meta:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Model for {dataset_type} not available"
+        )
+    
+    features = meta[dataset_type]['features']
+    X = compute_realtime_features(data, features, dataset_type)
     
     # Predict with ensemble or single model
     predictions = []
-    for name, model in models.items():
+    for name, model in models[dataset_type].items():
         if name == 'lightgbm':
-            pred = model.predict(X, num_iteration=meta.get('best_iteration', None))[0]
+            pred = model.predict(X, num_iteration=meta[dataset_type].get('best_iteration', None))[0]
         elif name == 'xgboost':
             dmatrix = xgb.DMatrix(X)
             pred = model.predict(dmatrix)[0]
@@ -140,32 +171,72 @@ def predict(inp: TransactionInput):
             pred = model.predict_proba(X)[0, 1]
         predictions.append(pred)
     
-    # Average predictions for ensemble, or use single prediction
+    # Average predictions for ensemble
     proba = float(np.mean(predictions))
     
-    # Compute SHAP values (local explanation) - use LightGBM for speed
-    explainer = app.state.explainer
+    # Compute SHAP values
+    explainer = explainers[dataset_type]
     try:
-        shap_values = explainer.shap_values(X)[0]  # for binary classification returns list in some versions
+        shap_values = explainer.shap_values(X)[0]
     except Exception:
-        # fallback
         shap_values = explainer(X.values)
+    
     # Build top-K explanation
     feat_imp = list(zip(features, shap_values))
     feat_imp_sorted = sorted(feat_imp, key=lambda x: abs(x[1]), reverse=True)[:5]
     explanations = [{"feature": f, "shap_value": float(s)} for f,s in feat_imp_sorted]
+    
     action = "allow"
-    thr = float(meta.get('threshold', 0.5))
+    thr = float(meta[dataset_type].get('threshold', 0.5))
     if proba >= thr:
         action = "block"
     elif proba >= 0.5:
-        action = "challenge"  # business rule example
+        action = "challenge"
+    
     return {
         "probability": proba,
         "threshold": thr,
         "action": action,
         "explanations": explanations
     }
+
+@app.get("/health")
+def health():
+    """Health check endpoint"""
+    available_models = list(models.keys())
+    return {
+        "status": "ok",
+        "available_models": available_models
+    }
+
+@app.post("/predict/transaction")
+def predict_transaction(inp: TransactionInput):
+    """Предсказание для транзакций"""
+    return predict_for_dataset(inp.transaction, 'transactions')
+
+@app.post("/predict/client_activity")
+def predict_client_activity(inp: ClientActivityInput):
+    """Предсказание для активности клиента"""
+    return predict_for_dataset(inp.activity, 'client_activity')
+
+@app.post("/predict/combined")
+def predict_combined(inp: CombinedInput):
+    """Предсказание для обоих типов данных"""
+    results = {}
+    
+    if inp.transaction:
+        try:
+            results['transactions'] = predict_for_dataset(inp.transaction, 'transactions')
+        except HTTPException as e:
+            results['transactions'] = {"error": str(e.detail)}
+    
+    if inp.activity:
+        try:
+            results['client_activity'] = predict_for_dataset(inp.activity, 'client_activity')
+        except HTTPException as e:
+            results['client_activity'] = {"error": str(e.detail)}
+    
+    return results
 
 if __name__ == "__main__":
     uvicorn.run("infer_service:app", host="0.0.0.0", port=8000, reload=False)
